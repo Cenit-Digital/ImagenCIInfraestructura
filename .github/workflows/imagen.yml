@@ -85,7 +85,11 @@ jobs:
           [ "$bytes" -lt "$TOPE_BYTES" ] || { echo "::error::la imagen supera el tope"; exit 1; }
 
       # Binario oficial de trivy con hash fijado, sin trivy-action (incidente de marzo de 2026; misma versión y hash que la
-      # CI de KubernetesInfrastructure). Falla con vulnerabilidades CRITICAL o HIGH que ya tienen arreglo.
+      # CI de KubernetesInfrastructure).
+      # - Puerta: paquetes del SISTEMA con CRITICAL o HIGH que ya tienen arreglo (la capa que controla esta imagen).
+      # - Informe (no bloquea): los binarios y paquetes de pip que instala el bootstrap. Son las MISMAS versiones fijadas
+      #   que usan la máquina de control y la CI alojada; se suben en scripts/bootstrap-control-node.sh del repo privado
+      #   (Renovate), no aquí. Esta imagen solo ejecuta la CI de ese repo: no sirve tráfico ni guarda secretos.
       - name: Escaneo de vulnerabilidades (trivy image)
         run: |
           set -euo pipefail
@@ -95,8 +99,11 @@ jobs:
             "https://github.com/aquasecurity/trivy/releases/download/v${version}/${file}"
           echo "1816b632dfe529869c740c0913e36bd1629cb7688bd5634f4a858c1d57c88b75  $RUNNER_TEMP/${file}" | sha256sum -c -
           tar -xzf "$RUNNER_TEMP/$file" -C "$RUNNER_TEMP" trivy
-          "$RUNNER_TEMP/trivy" image --skip-version-check --scanners vuln --severity CRITICAL,HIGH --ignore-unfixed \
-            --exit-code 1 "$PRUEBA"
+          trivy() { "$RUNNER_TEMP/trivy" image --skip-version-check --scanners vuln --severity CRITICAL,HIGH --ignore-unfixed "$@"; }
+          echo "::group::Informe de las herramientas del bootstrap (no bloquea)"
+          trivy --pkg-types library --format table --exit-code 0 "$PRUEBA"
+          echo "::endgroup::"
+          trivy --pkg-types os --exit-code 1 "$PRUEBA"
 
   # Único job con permiso de escritura en GHCR: solo en main, nunca en un PR. Reconstruye con la caché del job imagen y desde
   # las mismas entradas fijadas que ya se probaron y escanearon allí.
