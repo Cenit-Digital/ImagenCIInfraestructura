@@ -1,0 +1,146 @@
+name: Imagen
+
+# Construye, prueba y publica ghcr.io/cenit-digital/ci-infraestructura: las herramientas de la CI de
+# Cenit-Digital/KubernetesInfrastructure para los runners propios (issue KubernetesInfrastructure#68).
+# - Job `imagen` (siempre, sin permisos de escritura): construye, prueba como uid 1001 sin root y escanea.
+# - Job `publicar` (solo push a main o a mano desde main; único con packages: write): publica :sha-<commit> y deja en el
+#   resumen la referencia con digest, que es la que se copia a harness-ci.yml del repo privado.
+# Etiquetas inmutables y nunca `latest`. Acciones fijadas por hash de commit (la versión, en el comentario).
+# Repo público: estos minutos de Actions no cuentan para el cupo de la organización.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Dockerfile"
+      - "fuentes/**"
+      - ".github/workflows/imagen.yml"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: imagen-${{ github.ref }}
+  # Una publicación a medias no se cancela; las pruebas de un PR, sí.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  IMAGEN: ghcr.io/cenit-digital/ci-infraestructura
+  PRUEBA: local/ci-infraestructura:prueba
+  TOPE_BYTES: "2500000000"
+
+jobs:
+  imagen:
+    name: Construir, probar y escanear
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4.4.1
+
+      - name: Construir para probar
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc  # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          push: false
+          provenance: false
+          sbom: false
+          cache-from: type=gha,scope=ci
+          cache-to: type=gha,mode=max,scope=ci
+          tags: ${{ env.PRUEBA }}
+
+      - name: Prueba como uid 1001, sin capacidades ni privilegios (como el pod de trabajo de ARC)
+        run: |
+          set -euo pipefail
+          docker run --rm --user 1001:123 --cap-drop ALL --security-opt no-new-privileges "$PRUEBA" bash -euo pipefail -c '
+            id
+            tofu version | sed -n 1p
+            tflint --version | sed -n 1p
+            kubeconform -v
+            kubectl version --client | sed -n 1p
+            gitleaks version
+            shellcheck --version | sed -n 2p
+            yamllint --version
+            ansible-lint --version | sed -n 1p
+            ansible-galaxy collection list 2>/dev/null | grep -E "community.general|ansible.posix"
+            python3 -I -c "import yaml; print(\"PyYAML\", yaml.__version__)"
+            git --version
+            ! command -v sudo
+            cd /opt/cenit-ci/fuentes && sha256sum -c /opt/cenit-ci/fuentes.sha256
+          '
+
+      - name: Tamaño de la imagen
+        run: |
+          set -euo pipefail
+          bytes="$(docker image inspect --format '{{.Size}}' "$PRUEBA")"
+          echo "Tamaño: ${bytes} bytes (tope ${TOPE_BYTES})"
+          echo "- ${IMAGEN}: $((bytes / 1000000)) MB (tope $((TOPE_BYTES / 1000000)) MB)" >> "$GITHUB_STEP_SUMMARY"
+          [ "$bytes" -lt "$TOPE_BYTES" ] || { echo "::error::la imagen supera el tope"; exit 1; }
+
+      # Binario oficial de trivy con hash fijado, sin trivy-action (incidente de marzo de 2026; misma versión y hash que la
+      # CI de KubernetesInfrastructure). Falla con vulnerabilidades CRITICAL o HIGH que ya tienen arreglo.
+      - name: Escaneo de vulnerabilidades (trivy image)
+        run: |
+          set -euo pipefail
+          version=0.69.3
+          file="trivy_${version}_Linux-64bit.tar.gz"
+          curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSL -o "$RUNNER_TEMP/$file" \
+            "https://github.com/aquasecurity/trivy/releases/download/v${version}/${file}"
+          echo "1816b632dfe529869c740c0913e36bd1629cb7688bd5634f4a858c1d57c88b75  $RUNNER_TEMP/${file}" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/$file" -C "$RUNNER_TEMP" trivy
+          "$RUNNER_TEMP/trivy" image --skip-version-check --scanners vuln --severity CRITICAL,HIGH --ignore-unfixed \
+            --exit-code 1 "$PRUEBA"
+
+  # Único job con permiso de escritura en GHCR: solo en main, nunca en un PR. Reconstruye con la caché del job imagen y desde
+  # las mismas entradas fijadas que ya se probaron y escanearon allí.
+  publicar:
+    name: Publicar
+    needs: imagen
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4.4.1
+
+      - name: Iniciar sesión en GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f  # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publicar
+        id: publicar
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc  # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          sbom: false
+          cache-from: type=gha,scope=ci
+          tags: ${{ env.IMAGEN }}:sha-${{ github.sha }}
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
+
+      - name: Referencia para harness-ci.yml
+        env:
+          DIGEST: ${{ steps.publicar.outputs.digest }}
+        run: |
+          set -euo pipefail
+          ref="${IMAGEN}:sha-${GITHUB_SHA}@${DIGEST}"
+          echo "$ref"
+          { echo "## Imagen publicada"; echo ""; echo '```'; echo "$ref"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
