@@ -20,7 +20,7 @@ COPY fuentes/ /opt/cenit-ci/fuentes/
 RUN /opt/cenit-ci/fuentes/scripts/bootstrap-control-node.sh \
  && cd /opt/cenit-ci/fuentes \
  && sha256sum scripts/bootstrap-control-node.sh scripts/bootstrap-checksums.txt ansible/requirements.yml > /opt/cenit-ci/fuentes.sha256 \
- && apt-get purge -y -qq sudo \
+ && SUDO_FORCE_REMOVE=yes apt-get purge -y -qq sudo \
  && apt-get autoremove -y -qq \
  && rm -rf /var/lib/apt/lists/* /opt/cenit-ci/.cache \
  && groupadd -g 123 ci \
