@@ -76,6 +76,27 @@ jobs:
             cd /opt/cenit-ci/fuentes && sha256sum -c /opt/cenit-ci/fuentes.sha256
           '
 
+      - name: Obtener Node 26 oficial para comprobar su runtime en la imagen
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
+        with:
+          node-version: "26"
+          package-manager-cache: false
+
+      - name: Node 26 arranca en la imagen final sin root
+        run: |
+          set -euo pipefail
+          node_bin="$(readlink -f "$(command -v node)")"
+          node --version
+          docker run --rm --user 1001:123 --cap-drop ALL --security-opt no-new-privileges \
+            --mount "type=bind,source=$node_bin,target=/tmp/node26,readonly" \
+            "$PRUEBA" /tmp/node26 -e '
+              const assert = require("node:assert/strict");
+              assert.equal(process.getuid(), 1001);
+              assert.equal(process.getgid(), 123);
+              assert.equal(process.versions.node.split(".")[0], "26");
+              console.log(process.version, "uid=" + process.getuid(), "gid=" + process.getgid());
+            '
+
       - name: Tamaño de la imagen
         run: |
           set -euo pipefail
