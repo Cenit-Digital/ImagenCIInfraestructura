@@ -11,8 +11,9 @@ ARG DEBIAN_FRONTEND=noninteractive
 ENV HOME=/opt/cenit-ci
 
 # sudo solo durante la construcción: el bootstrap lo invoca y aquí corre como root. python3-yaml lo usan verify.sh y los tests.
+# libatomic1 es dependencia de los binarios oficiales Linux de Node >= 25; explícita para conservarla tras autoremove.
 RUN apt-get update -qq \
- && apt-get install -y -qq --no-install-recommends sudo ca-certificates curl python3-yaml \
+ && apt-get install -y -qq --no-install-recommends sudo ca-certificates curl python3-yaml libatomic1 \
  && rm -rf /var/lib/apt/lists/*
 
 COPY fuentes/ /opt/cenit-ci/fuentes/
