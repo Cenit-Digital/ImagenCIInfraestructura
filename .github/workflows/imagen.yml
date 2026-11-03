@@ -97,6 +97,24 @@ jobs:
               console.log(process.version, "uid=" + process.getuid(), "gid=" + process.getgid());
             '
 
+      - name: promtool comprueba y evalúa reglas sintéticas sin root
+        run: |
+          set -euo pipefail
+          docker run --rm --user 1001:123 --cap-drop ALL --security-opt no-new-privileges "$PRUEBA" bash -euo pipefail -c '
+            promtool --version
+            tmp="$(mktemp -d)"
+            trap "rm -rf -- \"$tmp\"" EXIT
+            cd "$tmp"
+            printf "%s\n" "groups:" "  - name: smoke" "    rules:" \
+              "      - alert: ToolSmoke" "        expr: vector(1)" > rules.yaml
+            printf "%s\n" "rule_files: [rules.yaml]" "evaluation_interval: 1m" "tests:" \
+              "  - interval: 1m" "    input_series: []" "    alert_rule_test:" \
+              "      - eval_time: 1m" "        alertname: ToolSmoke" "        exp_alerts:" \
+              "          - exp_labels: {}" "            exp_annotations: {}" > test.yaml
+            promtool check rules --lint-fatal rules.yaml
+            promtool test rules test.yaml
+          '
+
       - name: Tamaño de la imagen
         run: |
           set -euo pipefail

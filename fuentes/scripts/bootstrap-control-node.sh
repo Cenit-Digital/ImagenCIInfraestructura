@@ -24,6 +24,7 @@ TFLINT_VERSION=0.64.0
 FLUX_VERSION=2.9.6
 HELM_VERSION=4.3.1
 KUBECTL_VERSION=1.36.5      # misma rama menor que el canal "stable" de k3s
+PROMTOOL_VERSION=3.13.5    # Prometheus LTS 3.13; solo la herramienta, sin servidor
 ANSIBLE_CORE_VERSION=2.21.5
 ANSIBLE_LINT_VERSION=26.10.1
 PRE_COMMIT_VERSION=4.7.0
@@ -141,6 +142,15 @@ fetch "https://dl.k8s.io/release/v${KUBECTL_VERSION}/bin/linux/amd64/kubectl.sha
 pin_check "$d" kubectl
 $SUDO install -m 0755 "$d/kubectl" /usr/local/bin/kubectl
 
+echo "== promtool ${PROMTOOL_VERSION} (linux/amd64) =="
+d="$WORK/promtool"
+get_verified "$d" \
+  "$(gh prometheus/prometheus "v${PROMTOOL_VERSION}")/prometheus-${PROMTOOL_VERSION}.linux-amd64.tar.gz" \
+  "$(gh prometheus/prometheus "v${PROMTOOL_VERSION}")/sha256sums.txt"
+(cd "$d" && tar -xzf "prometheus-${PROMTOOL_VERSION}.linux-amd64.tar.gz" \
+  --strip-components=1 "prometheus-${PROMTOOL_VERSION}.linux-amd64/promtool")
+$SUDO install -m 0755 "$d/promtool" /usr/local/bin/promtool
+
 echo "== Python (pipx): ansible-core, ansible-lint, pre-commit, yamllint =="
 export PIPX_HOME="$HOME/.local/pipx" PIPX_BIN_DIR="$HOME/.local/bin"
 export PATH="$PIPX_BIN_DIR:$PATH"
@@ -171,6 +181,7 @@ first_line tflint --version
 first_line flux --version
 first_line helm version --short
 first_line kubectl version --client
+first_line promtool --version
 first_line ansible --version
 first_line ansible-lint --version
 first_line pre-commit --version
