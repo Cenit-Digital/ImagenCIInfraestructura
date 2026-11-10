@@ -12,7 +12,10 @@ ENV HOME=/opt/cenit-ci
 
 # sudo solo durante la construcción: el bootstrap lo invoca y aquí corre como root. python3-yaml lo usan verify.sh y los tests.
 # libatomic1 es dependencia de los binarios oficiales Linux de Node >= 25; explícita para conservarla tras autoremove.
+# upgrade: la base oficial tarda en reconstruirse y la puerta de trivy (paquetes del sistema) falla con CVE ya corregidos
+# en Ubuntu (2026-11-10: apt 2.8.3 de la base, CVE-2026-109518, corregido en 2.8.4ubuntu0.1).
 RUN apt-get update -qq \
+ && apt-get upgrade -y -qq \
  && apt-get install -y -qq --no-install-recommends sudo ca-certificates curl python3-yaml libatomic1 \
  && rm -rf /var/lib/apt/lists/*
 
