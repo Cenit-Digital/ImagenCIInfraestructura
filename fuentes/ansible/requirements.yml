@@ -2,6 +2,6 @@
 # Versiones fijadas; Renovate las actualiza por PR.
 collections:
   - name: community.general
-    version: "13.5.0"
+    version: "14.0.0"
   - name: ansible.posix
     version: "2.2.2"
